@@ -1,17 +1,17 @@
-﻿using System;
-using CitizenFX.Core;
+﻿using CitizenFX.Core;
 using CitizenFX.Core.UI;
-using CitizenFX.Core.Native;
-using static CitizenFX.Core.Native.API;
+
+using System;
 using System.Drawing;
+
 using TinyTween;
+
+using static CitizenFX.Core.Native.API;
 
 namespace FRFuel
 {
     public class HUD
     {
-        protected Scaleform buttons = new Scaleform("instructional_buttons");
-
         protected float fuelBarWidth() { return GetBarWidth(); }
         protected float fuelBarHeight = 6f;
 
@@ -78,16 +78,6 @@ namespace FRFuel
         }
 
         /// <summary>
-        /// Reloads scaleform movie to ensure that it will be rendered
-        /// Workaround for bug
-        /// Looks safe to span on every tick /shrug
-        /// </summary>
-        public void ReloadScaleformMovie()
-        {
-            buttons = new Scaleform("instructional_buttons");
-        }
-
-        /// <summary>
         /// Renders fuel bar
         /// </summary>
         /// <param name="currentFuelLevel"></param>
@@ -113,8 +103,6 @@ namespace FRFuel
             fuelBar.Size = fuelBarSize;
             fuelBarBackdrop.Size = fuelBarBackdropSize;
             fuelBarBack.Size = fuelBarBackSize;
-
-
 
             if (maxFuelLevel > 0 && currentFuelLevel < 9f)
             {
@@ -166,20 +154,6 @@ namespace FRFuel
         }
 
         /// <summary>
-        /// Change instructions for engine cut off
-        /// </summary>
-        public void InstructTurnOffEngine()
-        {
-            buttons.CallFunction("CLEAR_ALL");
-            buttons.CallFunction("TOGGLE_MOUSE_BUTTONS", 0);
-            buttons.CallFunction("CREATE_CONTAINER");
-
-            buttons.CallFunction("SET_DATA_SLOT", 0, Function.Call<string>((Hash)0x0499D7B09FC9B407, 2, (int)FRFuel.engineToggleControl, false), "Turn off engine");
-
-            buttons.CallFunction("DRAW_INSTRUCTIONAL_BUTTONS", -1);
-        }
-
-        /// <summary>
         /// Returns resolution specified bar width
         /// </summary>
         /// <returns></returns>
@@ -194,61 +168,29 @@ namespace FRFuel
                 case (float)1.5: // 3:2
                     width = bigMap ? 336f : 212f;
                     break;
+
                 case (float)1.33333337306976: // 4:3
                     width = bigMap ? 378f : 240f;
                     break;
+
                 case (float)1.66666662693024: // 5:3
                     width = bigMap ? 302f : 191f;
                     break;
+
                 case (float)1.25: // 5:4
                     width = bigMap ? 405f : 255f;
                     break;
+
                 case (float)1.60000002384186: // 16:10
                     width = bigMap ? 316f : 200f;
                     break;
+
                 default:
                     width = bigMap ? 285f : 180f; // 16:9
                     break;
             }
+
             return width;
-        }
-
-        /// <summary>
-        /// Change instructions for refueling and engine spin up
-        /// </summary>
-        public void InstructRefuelOrTurnOnEngine()
-        {
-            buttons.CallFunction("CLEAR_ALL");
-            buttons.CallFunction("TOGGLE_MOUSE_BUTTONS", 0);
-            buttons.CallFunction("CREATE_CONTAINER");
-
-            buttons.CallFunction("SET_DATA_SLOT", 0, Function.Call<string>((Hash)0x0499D7B09FC9B407, 2, (int)Control.Jump, false), "Refuel");
-            buttons.CallFunction("SET_DATA_SLOT", 1, Function.Call<string>((Hash)0x0499D7B09FC9B407, 2, (int)FRFuel.engineToggleControl, 0), "Turn on engine");
-
-            buttons.CallFunction("DRAW_INSTRUCTIONAL_BUTTONS", -1);
-        }
-
-        /// <summary>
-        /// Change instructions for manual refueling
-        /// </summary>
-        /// <param name="label"></param>
-        public void InstructManualRefuel(string label)
-        {
-            buttons.CallFunction("CLEAR_ALL");
-            buttons.CallFunction("TOGGLE_MOUSE_BUTTONS", 0);
-            buttons.CallFunction("CREATE_CONTAINER");
-
-            buttons.CallFunction("SET_DATA_SLOT", 0, Function.Call<string>((Hash)0x0499D7B09FC9B407, 2, (int)Control.Attack, false), label);
-
-            buttons.CallFunction("DRAW_INSTRUCTIONAL_BUTTONS", -1);
-        }
-
-        /// <summary>
-        /// Renders instruction
-        /// </summary>
-        public void RenderInstructions()
-        {
-            buttons.Render2D();
         }
     }
 }

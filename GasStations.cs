@@ -1,11 +1,11 @@
 ﻿using CitizenFX.Core;
-using static CitizenFX.Core.Native.API;
+
 using Newtonsoft.Json;
-using System.Collections.Generic;
+
+using static CitizenFX.Core.Native.API;
 
 namespace FRFuel
 {
-
     public static class GasStations
     {
         public static Vector3[] positions;

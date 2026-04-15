@@ -1,11 +1,15 @@
 #undef MANUAL_ENGINE_CUTOFF
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using CitizenFX.Core;
 using CitizenFX.Core.Native;
+using CitizenFX.Core.UI;
+
+using System;
+using System.Collections.Generic;
+using System.Dynamic;
+using System.Linq;
+using System.Threading.Tasks;
+
 using static CitizenFX.Core.Native.API;
 
 namespace FRFuel
@@ -16,11 +20,57 @@ namespace FRFuel
         delegate void AddFuel(float amount);
         delegate void SetFuel(float amount);
 
-        #region Fields
-        public static string fuelLevelPropertyName = "_Fuel_Level";
-        public static string manualRefuelAnimDict = "weapon@w_sp_jerrycan";
+        #region General Variables
 
-        public static string[] tankBones = new string[] {
+        private int _currentGasStationIndex;
+
+        protected bool _refuelAllowed = true;
+
+        protected bool _showHud = true;
+        protected bool _showHudWhenEngineOff = true;
+
+        protected bool _initialized = false;
+        protected bool _currentVehicleFuelLevelInitialized = false;
+
+        protected Config Config { get; set; }
+        protected Vehicle LastVehicle { get => _lastVehicle; set => _lastVehicle = value; }
+        
+        public HUD _hud;
+
+        public Random _random = new Random();
+        
+        private Vehicle _lastVehicle;
+        
+        protected InLoopOutAnimation _jerryCanAnimation;
+        
+        protected Blip[] _blips;
+
+        protected List<Pickup> _pickups;
+
+        #endregion
+
+        #region Constant Variables
+
+        protected float FUEL_TANK_CAPACITY = 65f;
+
+        protected float REFUEL_RATE = 1f;
+        protected float ADDED_FUEL_CAPACITOR = 0f;
+        protected float FUEL_CONSUMPTION_RATE = 1f;
+        protected float FUEL_ACCELERATION_IMPACT = 0.0002f;
+        protected float FUEL_TRACTION_IMPACT = 0.0001f;
+        protected float FUEL_RPM_IMPACT = 0.0005f;
+
+        public float SHOW_MARKER_RANGE = 250f;
+
+        public static string FUEL_LEVEL_DECOR = "_Fuel_Level";
+        public static string JERRYCAN_ANIM_DICT = "weapon@w_sp_jerrycan";
+
+        private string NORMAL_HEX = "FFB300"; // 255, 179, 0
+        private string WARNING_HEX = "FFF5DC"; // 255, 179, 0
+
+        public static Control ENGINE_TOGGLE = Control.ThrowGrenade; // INPUT_THROW_GRENADE
+
+        public static string[] TANK_BONES = new string[] {
             "petrolcap",
             "petroltank",
             "petroltank_r",
@@ -28,79 +78,101 @@ namespace FRFuel
             "wheel_lr"
         };
 
-        protected Blip[] blips;
-        protected List<Pickup> pickups;
-
-        protected float fuelTankCapacity = 65f;
-
-        protected float refuelRate = 1f;
-        protected float fuelConsumptionRate = 1f;
-        protected float fuelAccelerationImpact = 0.0002f;
-        protected float fuelTractionImpact = 0.0001f;
-        protected float fuelRPMImpact = 0.0005f;
-
-        public float showMarkerInRangeSquared = 250f;
-
-        public HUD hud;
-        public Random random = new Random();
-
-        private int currentGasStationIndex;
-        private Vehicle lastVehicle;
-
-        protected bool currentVehicleFuelLevelInitialized = false;
-        protected bool hudActive = false;
-        protected bool refuelAllowed = true;
-        protected float addedFuelCapacitor = 0f;
-
-        protected InLoopOutAnimation jerryCanAnimation;
-
-        protected Vehicle LastVehicle { get => lastVehicle; set => lastVehicle = value; }
-
-        protected Config Config { get; set; }
-        protected bool showHud = true;
-        protected bool showHudWhenEngineOff = true;
-
-        protected bool initialized = false;
-        public static Control engineToggleControl = Control.VehicleHorn;
-
-        private string fuelBarNormalHexColor = "FFB300"; // 255, 179, 0
-        private string fuelBarWarningHexColor = "FFF5DC"; // 255, 179, 0
         #endregion
+
+        #region Constructor
 
         /// <summary>
         /// Ctor
         /// </summary>
         public FRFuel()
         {
-            hud = new HUD();
+            _hud = new HUD();
 
-            jerryCanAnimation = new InLoopOutAnimation(
-              new Animation(manualRefuelAnimDict, "fire_intro"),
-              new Animation(manualRefuelAnimDict, "fire"),
-              new Animation(manualRefuelAnimDict, "fire_outro")
+            _jerryCanAnimation = new InLoopOutAnimation(
+              new Animation(JERRYCAN_ANIM_DICT, "fire_intro"),
+              new Animation(JERRYCAN_ANIM_DICT, "fire"),
+              new Animation(JERRYCAN_ANIM_DICT, "fire_outro")
             );
-
-            EventHandlers["frfuel:refuelAllowed"] += new Action<dynamic>((dynamic toggle) =>
-            {
-                if (toggle.GetType() == typeof(bool))
-                {
-                    refuelAllowed = (bool)toggle;
-                }
-            });
 
             GasStations.LoadGasStations();
 
-            blips = new Blip[GasStations.positions.Length];
-            pickups = new List<Pickup>();
+            if (GasStations.positions == null)
+            {
+                Debug.WriteLine("[FRFuel] Gas stations failed to load");
 
-            EntityDecoration.RegisterProperty(fuelLevelPropertyName, DecorationType.Float);
+                return;
+            }
+
+            _blips = new Blip[GasStations.positions.Length];
+            _pickups = new List<Pickup>();
 
             Exports.Add("addFuel", new AddFuel(ExportsAddFuel));
             Exports.Add("setFuel", new SetFuel(ExportsSetFuel));
             Exports.Add("getCurrentFuelLevel", new GetCurrentFuelLevelDelegate(ExportsGetCurrentFuelLevel));
-
-            Tick += OnTick;
         }
+
+        #endregion
+
+        #region Tick Handlers
+
+        /// <summary>
+        /// On tick
+        /// </summary>
+        /// <returns></returns>
+        [Tick]
+        internal async Task OnTick()
+        {
+            if (!_initialized)
+            {
+                _initialized = true;
+
+                LoadConfig();
+
+                CreateBlips();
+
+                EntityDecoration.RegisterProperty(FUEL_LEVEL_DECOR, DecorationType.Float);
+            }
+
+            await ManageNearbyJerryCanPickUps();
+
+            Ped playerPed = Game.PlayerPed;
+            Vehicle vehicle = playerPed.CurrentVehicle;
+
+            if (!PlayerVehicleViableForFuel())
+            {
+                ManualRefuel(playerPed);
+
+                _currentVehicleFuelLevelInitialized = false;
+
+                return;
+            }
+
+            if (_lastVehicle != vehicle)
+            {
+                _lastVehicle = vehicle;
+                _currentVehicleFuelLevelInitialized = false;
+            }
+
+            if (!_currentVehicleFuelLevelInitialized)
+            {
+                InitFuel(vehicle);
+            }
+
+            ConsumeFuel(vehicle);
+            RenderUI(playerPed);
+
+            await Task.FromResult(0);
+        }
+
+        #endregion
+
+        #region Event Handlers
+
+        [EventHandler("frfuel:refuelAllowed")]
+        internal void OnRefuelAllowed(bool toggle) => _refuelAllowed = toggle;
+
+        #endregion
 
         #region Init
         /// <summary>
@@ -121,13 +193,13 @@ namespace FRFuel
 
             Config = new Config(configContent);
 
-            showHud = Config.Get("ShowHud", "true") == "true";
-            showHudWhenEngineOff = Config.Get("ShowHudWhenEngineOff", "true").ToLower() == "true";
+            _showHud = Config.Get("ShowHud", "true") == "true";
+            _showHudWhenEngineOff = Config.Get("ShowHudWhenEngineOff", "true").ToLower() == "true";
 
             var fuelConsumptionString = Config.Get("FuelConsumptionRate", "1");
             if (float.TryParse(fuelConsumptionString, out float tmpFuelConsumptionRate))
             {
-                fuelConsumptionRate = tmpFuelConsumptionRate;
+                FUEL_CONSUMPTION_RATE = tmpFuelConsumptionRate;
             }
 #if DEBUG
             else
@@ -139,7 +211,7 @@ namespace FRFuel
             var refuelRateString = Config.Get("RefuelRate", "1");
             if (float.TryParse(refuelRateString, out float tmpRefuelRate))
             {
-                refuelRate = tmpRefuelRate;
+                REFUEL_RATE = tmpRefuelRate;
             }
 #if DEBUG
             else
@@ -149,23 +221,23 @@ namespace FRFuel
 #endif
 
             // if a valid key is set in the config file, set the control.
-            if (int.TryParse(Config.Get("EngineToggleKey", "86"), out int tmpControl))
+            if (int.TryParse(Config.Get("EngineToggleKey", "44"), out int tmpControl))
             {
-                engineToggleControl = (Control)tmpControl;
+                ENGINE_TOGGLE = (Control)tmpControl;
             }
 
-            fuelBarNormalHexColor = Config.Get("FuelBarNormalColor", fuelBarNormalHexColor).Replace("\"", "").Replace("#", "");
+            NORMAL_HEX = Config.Get("FuelBarNormalColor", NORMAL_HEX).Replace("\"", "").Replace("#", "");
             // normal color
-            int r = MathUtil.Clamp(int.Parse(fuelBarNormalHexColor.Substring(0, 2), System.Globalization.NumberStyles.HexNumber), 0, 255);
-            int g = MathUtil.Clamp(int.Parse(fuelBarNormalHexColor.Substring(2, 2), System.Globalization.NumberStyles.HexNumber), 0, 255);
-            int b = MathUtil.Clamp(int.Parse(fuelBarNormalHexColor.Substring(4, 2), System.Globalization.NumberStyles.HexNumber), 0, 255);
+            int r = MathUtil.Clamp(int.Parse(NORMAL_HEX.Substring(0, 2), System.Globalization.NumberStyles.HexNumber), 0, 255);
+            int g = MathUtil.Clamp(int.Parse(NORMAL_HEX.Substring(2, 2), System.Globalization.NumberStyles.HexNumber), 0, 255);
+            int b = MathUtil.Clamp(int.Parse(NORMAL_HEX.Substring(4, 2), System.Globalization.NumberStyles.HexNumber), 0, 255);
 
-            fuelBarWarningHexColor = Config.Get("FuelBarWarningColor", fuelBarNormalHexColor).Replace("\"", "").Replace("#", "");
+            WARNING_HEX = Config.Get("FuelBarWarningColor", NORMAL_HEX).Replace("\"", "").Replace("#", "");
             // warning color
-            int wR = MathUtil.Clamp(int.Parse(fuelBarWarningHexColor.Substring(0, 2), System.Globalization.NumberStyles.HexNumber), 0, 255);
-            int wG = MathUtil.Clamp(int.Parse(fuelBarWarningHexColor.Substring(2, 2), System.Globalization.NumberStyles.HexNumber), 0, 255);
-            int wB = MathUtil.Clamp(int.Parse(fuelBarWarningHexColor.Substring(4, 2), System.Globalization.NumberStyles.HexNumber), 0, 255);
-            hud.UpdateBarColors(r, g, b, wR, wG, wB);
+            int wR = MathUtil.Clamp(int.Parse(WARNING_HEX.Substring(0, 2), System.Globalization.NumberStyles.HexNumber), 0, 255);
+            int wG = MathUtil.Clamp(int.Parse(WARNING_HEX.Substring(2, 2), System.Globalization.NumberStyles.HexNumber), 0, 255);
+            int wB = MathUtil.Clamp(int.Parse(WARNING_HEX.Substring(4, 2), System.Globalization.NumberStyles.HexNumber), 0, 255);
+            _hud.UpdateBarColors(r, g, b, wR, wG, wB);
 
 #if DEBUG
             Debug.WriteLine($"CreatePickups: {Config.Get("CreatePickups", "true")}");
@@ -194,7 +266,7 @@ namespace FRFuel
                 blip.IsShortRange = true;
                 blip.Name = "Gas Station";
 
-                blips[i] = blip;
+                _blips[i] = blip;
             }
         }
 
@@ -226,16 +298,16 @@ namespace FRFuel
 
             IEnumerable<Vector3> positions = GetNearbyJerryCanPickUpCoordinates(pos);
 
-            if (positions.Count() == 0 && pickups.Count != 0)
+            if (positions.Count() == 0 && _pickups.Count != 0)
             {
-                pickups.ForEach(p => p.Delete());
-                pickups.Clear();
+                _pickups.ForEach(p => p.Delete());
+                _pickups.Clear();
             }
             else
             {
                 positions.ToList().ForEach(position =>
                 {
-                    if (!pickups.Any(pickup => position.DistanceToSquared(pickup.Position) < 5f))
+                    if (!_pickups.Any(pickup => position.DistanceToSquared(pickup.Position) < 5f))
                     {
                         // add pickup if one doesn't exist within 5f proximity of it
                         int pickupHandle = CreatePickup(
@@ -248,13 +320,47 @@ namespace FRFuel
 
                         Pickup pickup = new Pickup(pickupHandle);
 
-                        pickups.Add(pickup);
+                        _pickups.Add(pickup);
                     }
                 });
             }
             await Task.FromResult(0);
         }
         #endregion
+
+        #region Helper Methods
+
+        /// <summary>
+        /// Returns vehicle's max fuel level
+        /// </summary>
+        /// <param name="vehicle"></param>
+        /// <returns></returns>
+        public float VehicleMaxFuelLevel(Vehicle vehicle) => GetVehicleHandlingFloat(vehicle.Handle, "CHandlingData", "fPetrolTankVolume");
+
+        /// <summary>
+        /// Returns random fuel level between 1/3 and 3/4 of tank capacity
+        /// </summary>
+        /// <param name="fuelLevel"></param>
+        /// <returns></returns>
+        public float RandomizeFuelLevel(float fuelLevel)
+        {
+            float min = fuelLevel / 3f;
+            float max = fuelLevel - (fuelLevel / 4);
+
+            return (float)((_random.NextDouble() * (max - min)) + min);
+        }
+
+        /// <summary>
+        /// Check if the players current vehicle is refuelable
+        /// </summary>
+        /// <returns></returns>
+        protected bool PlayerVehicleViableForFuel()
+        {
+            Ped playerPed = Game.PlayerPed;
+            Vehicle vehicle = playerPed.CurrentVehicle;
+
+            return playerPed.IsInVehicle() && (vehicle.Model.IsCar || vehicle.Model.IsBike || vehicle.Model.IsQuadbike) && vehicle.GetPedOnSeat(VehicleSeat.Driver) == playerPed && vehicle.IsAlive;
+        }
 
         /// <summary>
         /// External API for getting current fuel leve;
@@ -306,10 +412,8 @@ namespace FRFuel
         /// <returns></returns>
         public int GetGasStationIndexInRange(Vector3 pos, float rangeSquared)
         {
-            for (int i = 0; i < blips.Length; i++)
+            for (int i = 0; i < _blips.Length; i++)
             {
-                Blip blip = blips[i];
-
                 if (Vector3.DistanceSquared(GasStations.positions[i], pos) < rangeSquared)
                 {
                     return i;
@@ -317,6 +421,78 @@ namespace FRFuel
             }
 
             return -1;
+        }
+
+        /// <summary>
+        /// Checks if vehicle is within range of activation
+        /// for any pump at current gas station
+        /// </summary>
+        /// <param name="vehicle"></param>
+        /// <returns></returns>
+        public bool IsVehicleNearAnyPump(Vehicle vehicle)
+        {
+            Vector3 fuelTankPos = GetVehicleTankPos(vehicle);
+
+            foreach (Vector3 pump in GasStations.pumps[_currentGasStationIndex])
+            {
+                if (Vector3.DistanceSquared(pump, fuelTankPos) <= 20f)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Returns vehicle's current fuel level
+        /// </summary>
+        /// <param name="vehicle"></param>
+        /// <returns></returns>
+        public float VehicleFuelLevel(Vehicle vehicle)
+        {
+            if (vehicle.HasDecor(FUEL_LEVEL_DECOR))
+            {
+                return vehicle.GetDecor<float>(FUEL_LEVEL_DECOR);
+            }
+
+            return 65f;
+        }
+
+        /// <summary>
+        /// Correctly sets vehicle's fuel level
+        /// </summary>
+        /// <param name="vehicle"></param>
+        /// <param name="fuelLevel"></param>
+        public void VehicleSetFuelLevel(Vehicle vehicle, float fuelLevel)
+        {
+            float max = VehicleMaxFuelLevel(vehicle);
+
+            if (fuelLevel > max)
+            {
+                fuelLevel = max;
+            }
+
+            vehicle.FuelLevel = fuelLevel;
+            vehicle.SetDecor(FUEL_LEVEL_DECOR, fuelLevel);
+        }
+
+        /// <summary>
+        /// Inits fuel for given vehicle
+        /// </summary>
+        /// <param name="vehicle"></param>
+        public void InitFuel(Vehicle vehicle)
+        {
+            _currentVehicleFuelLevelInitialized = true;
+
+            FUEL_TANK_CAPACITY = VehicleMaxFuelLevel(vehicle);
+
+            if (!vehicle.HasDecor(FUEL_LEVEL_DECOR))
+            {
+                vehicle.SetDecor(FUEL_LEVEL_DECOR, RandomizeFuelLevel(FUEL_TANK_CAPACITY));
+            }
+
+            vehicle.FuelLevel = vehicle.GetDecor<float>(FUEL_LEVEL_DECOR);
         }
 
         /// <summary>
@@ -328,9 +504,9 @@ namespace FRFuel
         {
             EntityBone bone = null;
 
-            foreach (var boneName in tankBones)
+            foreach (string boneName in TANK_BONES)
             {
-                var boneIndex = GetEntityBoneIndexByName(vehicle.Handle, boneName);
+                int boneIndex = GetEntityBoneIndexByName(vehicle.Handle, boneName);
 
                 bone = vehicle.Bones[boneIndex];
 
@@ -349,24 +525,135 @@ namespace FRFuel
         }
 
         /// <summary>
-        /// Checks if vehicle is within range of activation
-        /// for any pump at current gas station
+        /// Controls engine
         /// </summary>
         /// <param name="vehicle"></param>
-        /// <returns></returns>
-        public bool IsVehicleNearAnyPump(Vehicle vehicle)
+        public void ControlEngine(Vehicle vehicle)
         {
-            var fuelTankPos = GetVehicleTankPos(vehicle);
+            // all controls related to G
+            //Game.DisableControlThisFrame(0, ENGINE_TOGGLE);
+            //Game.DisableControlThisFrame(0, Control.Detonate);
+            //Game.DisableControlThisFrame(0, Control.PhoneCameraGrid);
+            //Game.DisableControlThisFrame(0, Control.VehicleFlyUnderCarriage);
 
-            foreach (var pump in GasStations.pumps[currentGasStationIndex])
+            if (!Game.IsControlJustReleased(0, ENGINE_TOGGLE) || Game.IsControlPressed(0, Control.Context))
             {
-                if (Vector3.DistanceSquared(pump, fuelTankPos) <= 20f)
-                {
-                    return true;
-                }
+                return;
             }
 
-            return false;
+            if (vehicle.IsEngineRunning)
+            {
+                vehicle.IsDriveable = false;
+
+                SetVehicleEngineOn(vehicle.Handle, false, true, true);
+
+                return;
+            }
+
+            vehicle.IsDriveable = true;
+            vehicle.IsEngineRunning = true;
+        }
+
+        /// <summary>
+        /// Renders fuel bar and marker
+        /// </summary>
+        /// <param name="playerPed"></param>
+        public void RenderUI(Ped playerPed)
+        {
+            int gasStationIndex = GetGasStationIndexInRange(playerPed.Position, SHOW_MARKER_RANGE);
+
+            if (gasStationIndex != -1 && gasStationIndex != _currentGasStationIndex)
+            {
+                _currentGasStationIndex = gasStationIndex;
+            }
+
+            if (gasStationIndex == -1 && _currentGasStationIndex != -1)
+            {
+                _currentGasStationIndex = -1;
+            }
+
+            if (!_showHud || !IsHudPreferenceSwitchedOn())
+            {
+                return;
+            }
+
+            Vehicle currentVeh = playerPed.CurrentVehicle;
+
+            bool nearPump = _currentGasStationIndex != -1;
+            bool engineRunning = currentVeh.IsEngineRunning;
+
+            if (!nearPump && !engineRunning && !_showHudWhenEngineOff)
+            {
+                return;
+            }
+
+            _hud.RenderBar(currentVeh.FuelLevel, FUEL_TANK_CAPACITY);
+        }
+
+        /// <summary>
+        /// Handles manual vehicle refueling using Jerry Can
+        /// </summary>
+        /// <param name="playerPed"></param>
+        public void ManualRefuel(Ped playerPed)
+        {
+            if (playerPed.Weapons.Current.Hash != WeaponHash.PetrolCan)
+            {
+                return;
+            }
+
+            Vector3 pos = playerPed.Position;
+
+            if (!IsAnyVehicleNearPoint(pos.X, pos.Y, pos.Z, 3f))
+            {
+                return;
+            }
+
+            Vehicle vehicle = World.GetAllVehicles().OrderBy(v => v.Position.DistanceToSquared(pos)).First();
+
+            if (
+                vehicle != null &&
+                vehicle.Exists() &&
+                vehicle.HasDecor(FUEL_LEVEL_DECOR)
+            )
+            {
+                float max = VehicleMaxFuelLevel(vehicle);
+                float current = VehicleFuelLevel(vehicle);
+
+                if (max - current < 0.5f)
+                {
+                    Screen.DisplayHelpTextThisFrame("Fuel tank is full");
+                }
+                else
+                {
+                    Screen.DisplayHelpTextThisFrame("Manual refueling");
+                }
+
+                if (!Game.IsControlPressed(0, Control.Attack))
+                {
+                    return;
+                }
+
+                _jerryCanAnimation.Magick(playerPed);
+
+                if (current < max)
+                {
+                    if (current + 0.1f >= max)
+                    {
+                        VehicleSetFuelLevel(vehicle, max);
+                    }
+                    else
+                    {
+                        VehicleSetFuelLevel(vehicle, current + 0.2f);
+                    }
+                }
+
+                if (Game.IsControlJustReleased(0, Control.VehicleAttack))
+                {
+                    _jerryCanAnimation.RewindAndStop(playerPed);
+                }
+
+                return;
+            }
         }
 
         /// <summary>
@@ -383,11 +670,11 @@ namespace FRFuel
                 float normalizedRPMValue = (float)Math.Pow(vehicle.CurrentRPM, 1.5);
                 float consumedFuel = 0f;
 
-                consumedFuel += normalizedRPMValue * fuelRPMImpact;
-                consumedFuel += vehicle.Acceleration * fuelAccelerationImpact;
-                consumedFuel += vehicle.MaxTraction * fuelTractionImpact;
+                consumedFuel += normalizedRPMValue * FUEL_RPM_IMPACT;
+                consumedFuel += vehicle.Acceleration * FUEL_ACCELERATION_IMPACT;
+                consumedFuel += vehicle.MaxTraction * FUEL_TRACTION_IMPACT;
 
-                fuel -= consumedFuel * fuelConsumptionRate;
+                fuel -= consumedFuel * FUEL_CONSUMPTION_RATE;
                 fuel = fuel < 0f ? 0f : fuel;
             }
 
@@ -399,12 +686,7 @@ namespace FRFuel
 #endif
 
             // Refueling at gas station
-            if (
-              // If we have gas station near us
-              currentGasStationIndex != -1 &&
-              // And near any pump
-              IsVehicleNearAnyPump(vehicle)
-            )
+            if (_currentGasStationIndex != -1 && IsVehicleNearAnyPump(vehicle))
             {
 #if MANUAL_ENGINE_CUTOFF
                 if (vehicle.Speed < 0.1f && fuel != 0)
@@ -416,37 +698,38 @@ namespace FRFuel
 
                 if (vehicle.IsEngineRunning)
                 {
-                    hud.InstructTurnOffEngine();
+                    Screen.DisplayHelpTextThisFrame("~INPUT_THROW_GRENADE~ Turn off engine");
+
+                    return;
                 }
-                else
+
+                Screen.DisplayHelpTextThisFrame("~INPUT_CONTEXT~ Refuel\n~INPUT_THROW_GRENADE~ Turn on engine");
+
+                if (!_refuelAllowed)
                 {
-                    hud.InstructRefuelOrTurnOnEngine();
-
-                    if (refuelAllowed)
-                    {
-                        if (Game.IsControlPressed(0, Control.Jump))
-                        {
-                            if (fuel < fuelTankCapacity)
-                            {
-                                float fuelPortion = 0.1f * refuelRate;
-
-                                fuel += fuelPortion;
-                                addedFuelCapacitor += fuelPortion;
-                            }
-                        }
-
-                        if (Game.IsControlJustReleased(0, Control.Jump) && addedFuelCapacitor > 0f)
-                        {
-                            TriggerEvent("frfuel:fuelAdded", addedFuelCapacitor);
-                            TriggerServerEvent("frfuel:fuelAdded", addedFuelCapacitor);
-                            addedFuelCapacitor = 0f;
-                        }
-                    }
+                    return;
                 }
 
-                hud.RenderInstructions();
-                PlayHUDAppearSound();
-                hudActive = true;
+                if (!Game.IsControlPressed(0, Control.Context))
+                {
+                    return;
+                }
+
+                if (fuel < FUEL_TANK_CAPACITY)
+                {
+                    float fuelPortion = 0.1f * REFUEL_RATE;
+
+                    fuel += fuelPortion;
+                    ADDED_FUEL_CAPACITOR += fuelPortion;
+                }
+
+                if (Game.IsControlJustReleased(0, Control.Context) && ADDED_FUEL_CAPACITOR > 0f)
+                {
+                    TriggerEvent("frfuel:fuelAdded", ADDED_FUEL_CAPACITOR);
+                    TriggerServerEvent("frfuel:fuelAdded", ADDED_FUEL_CAPACITOR);
+
+                    ADDED_FUEL_CAPACITOR = 0f;
+                }
             }
             else
             {
@@ -456,308 +739,11 @@ namespace FRFuel
                     vehicle.IsEngineRunning = true;
                 }
 #endif
-
-                hudActive = false;
             }
 
             VehicleSetFuelLevel(vehicle, fuel);
         }
 
-        /// <summary>
-        /// Controls engine
-        /// </summary>
-        /// <param name="vehicle"></param>
-        public void ControlEngine(Vehicle vehicle)
-        {
-            // Prevent the player from honking the horn whenever trying to toggle the engine.
-            if (engineToggleControl == Control.VehicleHorn)
-            {
-                Game.DisableControlThisFrame(0, Control.VehicleHorn);
-
-                // Also disable the rocket boost control for DLC cars.
-                Game.DisableControlThisFrame(0, (Control)351); // INPUT_VEH_ROCKET_BOOST (E on keyboard, L3 on controller)
-            }
-
-            if (Game.IsControlJustReleased(0, engineToggleControl) && !Game.IsControlPressed(0, Control.Jump))
-            {
-                if (vehicle.IsEngineRunning)
-                {
-                    vehicle.IsDriveable = false;
-                    //vehicle.IsEngineRunning = false;
-                    API.SetVehicleEngineOn(vehicle.Handle, false, true, true); // temporary fix for when the engine keeps turning back on.
-                }
-                else
-                {
-                    vehicle.IsDriveable = true;
-                    // FIXME: No neat default behaviour in 1103 :c
-                    vehicle.IsEngineRunning = true;
-                }
-            }
-        }
-
-
-        /// <summary>
-        /// Renders fuel bar and marker
-        /// </summary>
-        /// <param name="playerPed"></param>
-        public void RenderUI(Ped playerPed)
-        {
-            var gasStationIndex = GetGasStationIndexInRange(playerPed.Position, showMarkerInRangeSquared);
-
-            if (gasStationIndex != -1)
-            {
-                if (gasStationIndex != currentGasStationIndex)
-                {
-                    // Found gas station in range
-                    currentGasStationIndex = gasStationIndex;
-                }
-            }
-            else
-            {
-                if (currentGasStationIndex != -1)
-                {
-                    // Lost gas station in range
-                    currentGasStationIndex = -1;
-                }
-            }
-
-            if (showHud && IsHudPreferenceSwitchedOn())
-            {
-                // If not near any pump.
-                if (currentGasStationIndex == -1)
-                {
-                    // If the engine is on, then display it no matter the config option.
-                    if (playerPed.CurrentVehicle.IsEngineRunning)
-                    {
-                        hud.RenderBar(playerPed.CurrentVehicle.FuelLevel, fuelTankCapacity);
-                    }
-                    // If the engine is not running, then only display it if ShowHudWhenEngineOff is true.
-                    else if (showHudWhenEngineOff)
-                    {
-                        hud.RenderBar(playerPed.CurrentVehicle.FuelLevel, fuelTankCapacity);
-                    }
-                }
-                // If near a pump, always display the hud bar.
-                else
-                {
-                    hud.RenderBar(playerPed.CurrentVehicle.FuelLevel, fuelTankCapacity);
-                }
-            }
-        }
-
-        /// <summary>
-        /// Inits fuel for given vehicle
-        /// </summary>
-        /// <param name="vehicle"></param>
-        public void InitFuel(Vehicle vehicle)
-        {
-            currentVehicleFuelLevelInitialized = true;
-
-            fuelTankCapacity = VehicleMaxFuelLevel(vehicle);
-
-            if (!vehicle.HasDecor(fuelLevelPropertyName))
-            {
-                vehicle.SetDecor(
-                    fuelLevelPropertyName,
-                    RandomizeFuelLevel(fuelTankCapacity)
-                );
-            }
-
-            vehicle.FuelLevel = vehicle.GetDecor<float>(fuelLevelPropertyName);
-        }
-
-        /// <summary>
-        /// Returns random fuel level between 1/3 and 3/4 of tank capacity
-        /// </summary>
-        /// <param name="fuelLevel"></param>
-        /// <returns></returns>
-        public float RandomizeFuelLevel(float fuelLevel)
-        {
-            float min = fuelLevel / 3f;
-            float max = fuelLevel - (fuelLevel / 4);
-
-            return (float)((random.NextDouble() * (max - min)) + min);
-        }
-
-        /// <summary>
-        /// Correctly sets vehicle's fuel level
-        /// </summary>
-        /// <param name="vehicle"></param>
-        /// <param name="fuelLevel"></param>
-        public void VehicleSetFuelLevel(Vehicle vehicle, float fuelLevel)
-        {
-            float max = VehicleMaxFuelLevel(vehicle);
-
-            if (fuelLevel > max)
-            {
-                fuelLevel = max;
-            }
-
-            vehicle.FuelLevel = fuelLevel;
-            vehicle.SetDecor(fuelLevelPropertyName, fuelLevel);
-        }
-
-        /// <summary>
-        /// Returns vehicle's current fuel level
-        /// </summary>
-        /// <param name="vehicle"></param>
-        /// <returns></returns>
-        public float VehicleFuelLevel(Vehicle vehicle)
-        {
-            if (vehicle.HasDecor(fuelLevelPropertyName))
-            {
-                return vehicle.GetDecor<float>(fuelLevelPropertyName);
-            }
-            else
-            {
-                return 65f;
-            }
-        }
-
-        /// <summary>
-        /// Returns vehicle's max fuel level
-        /// </summary>
-        /// <param name="vehicle"></param>
-        /// <returns></returns>
-        public float VehicleMaxFuelLevel(Vehicle vehicle)
-        {
-            return GetVehicleHandlingFloat(vehicle.Handle, "CHandlingData", "fPetrolTankVolume");
-        }
-
-        /// <summary>
-        /// Handles manual vehicle refueling using Jerry Can
-        /// </summary>
-        /// <param name="playerPed"></param>
-        public void ManualRefuel(Ped playerPed)
-        {
-            if (playerPed.Weapons.Current.Hash == WeaponHash.PetrolCan)
-            {
-                Vector3 pos = playerPed.Position;
-
-                if (IsAnyVehicleNearPoint(pos.X, pos.Y, pos.Z, 3f))
-                {
-                    Vehicle vehicle = World.GetAllVehicles().OrderBy(v => v.Position.DistanceToSquared(pos)).First();
-
-                    if (
-                      vehicle != null &&
-                      vehicle.Exists() &&
-                      vehicle.HasDecor(fuelLevelPropertyName)
-                    )
-                    {
-                        float max = VehicleMaxFuelLevel(vehicle);
-                        float current = VehicleFuelLevel(vehicle);
-
-                        if (max - current < 0.5f)
-                        {
-                            hud.InstructManualRefuel("Fuel tank is full");
-                        }
-                        else
-                        {
-                            hud.InstructManualRefuel("Manual refueling");
-                        }
-
-                        if (Game.IsControlPressed(0, Control.Attack))
-                        {
-                            jerryCanAnimation.Magick(playerPed);
-
-                            if (current < max)
-                            {
-                                if (current + 0.1f >= max)
-                                {
-                                    VehicleSetFuelLevel(vehicle, max);
-                                }
-                                else
-                                {
-                                    VehicleSetFuelLevel(vehicle, current + 0.2f);
-                                }
-                            }
-                        }
-
-                        if (Game.IsControlJustReleased(0, Control.VehicleAttack))
-                        {
-                            jerryCanAnimation.RewindAndStop(playerPed);
-                        }
-
-                        hud.RenderInstructions();
-                        PlayHUDAppearSound();
-                        hudActive = true;
-                        return;
-                    }
-                }
-            }
-            hudActive = false;
-        }
-
-        protected void PlayHUDAppearSound()
-        {
-            if (hudActive == false)
-            {
-                Function.Call(Hash.PLAY_SOUND_FRONTEND, -1, "CONFIRM_BEEP", "HUD_MINI_GAME_SOUNDSET", 1);
-            }
-        }
-
-        protected bool PlayerVehicleViableForFuel()
-        {
-            Ped playerPed = Game.PlayerPed;
-            Vehicle vehicle = playerPed.CurrentVehicle;
-
-            return playerPed.IsInVehicle() &&
-              (
-                vehicle.Model.IsCar ||
-                vehicle.Model.IsBike ||
-                vehicle.Model.IsQuadbike
-              ) &&
-              vehicle.GetPedOnSeat(VehicleSeat.Driver) == playerPed &&
-              vehicle.IsAlive;
-        }
-
-        /// <summary>
-        /// On tick
-        /// </summary>
-        /// <returns></returns>
-        public async Task OnTick()
-        {
-            if (!initialized)
-            {
-                initialized = true;
-
-                LoadConfig();
-
-                CreateBlips();
-            }
-
-            await ManageNearbyJerryCanPickUps();
-
-            hud.ReloadScaleformMovie();
-
-            Ped playerPed = Game.PlayerPed;
-            Vehicle vehicle = playerPed.CurrentVehicle;
-
-            if (PlayerVehicleViableForFuel())
-            {
-
-                if (lastVehicle != vehicle)
-                {
-                    lastVehicle = vehicle;
-                    currentVehicleFuelLevelInitialized = false;
-                }
-
-                if (!currentVehicleFuelLevelInitialized)
-                {
-                    InitFuel(vehicle);
-                }
-
-                ConsumeFuel(vehicle);
-                RenderUI(playerPed);
-            }
-            else
-            {
-                ManualRefuel(playerPed);
-
-                currentVehicleFuelLevelInitialized = false;
-            }
-
-            await Task.FromResult(0);
-        }
+        #endregion
     }
 }
