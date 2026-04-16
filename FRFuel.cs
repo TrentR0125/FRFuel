@@ -154,6 +154,11 @@ namespace FRFuel
             {
                 ManualRefuel(playerPed);
 
+                Vehicle nearbyVeh = GetNearbyLastVehicle(playerPed);
+
+                ExternalRefuel(playerPed, nearbyVeh);
+                RenderUIOnFoot(playerPed, nearbyVeh);
+
                 _currentVehicleFuelLevelInitialized = false;
 
                 return;
@@ -348,6 +353,21 @@ namespace FRFuel
         /// <returns></returns>
         public float VehicleMaxFuelLevel(Vehicle vehicle) => GetVehicleHandlingFloat(vehicle.Handle, "CHandlingData", "fPetrolTankVolume");
 
+        internal void RenderUIOnFoot(Ped plyrPed, Vehicle vehicle)
+        {
+            if (vehicle == null)
+            {
+                return;
+            }
+
+            if (!_showHud || !IsHudPreferenceSwitchedOn())
+            {
+                return;
+            }
+
+            _hud.RenderBar(vehicle.FuelLevel, VehicleMaxFuelLevel(vehicle));
+        }
+
         /// <summary>
         /// Returns random fuel level between 1/3 and 3/4 of tank capacity
         /// </summary>
@@ -370,7 +390,44 @@ namespace FRFuel
             Ped playerPed = Game.PlayerPed;
             Vehicle vehicle = playerPed.CurrentVehicle;
 
-            return playerPed.IsInVehicle() && (vehicle.Model.IsCar || vehicle.Model.IsBike || vehicle.Model.IsQuadbike) && vehicle.GetPedOnSeat(VehicleSeat.Driver) == playerPed && vehicle.IsAlive;
+            if (vehicle == null || !vehicle.Exists())
+            {
+                return false;
+            }
+
+            return (vehicle.Model.IsCar || vehicle.Model.IsBike || vehicle.Model.IsQuadbike) && vehicle.GetPedOnSeat(VehicleSeat.Driver) == playerPed && vehicle.IsAlive;
+        }
+
+        /// <summary>
+        /// Get the nearest lats vehicle assigned to local ped
+        /// </summary>
+        /// <param name="plyrPed"></param>
+        /// <returns></returns>
+        internal Vehicle GetNearbyLastVehicle(Ped plyrPed)
+        {
+            Vehicle veh = plyrPed.LastVehicle;
+
+            if (veh == null || !veh.Exists())
+            {
+                return null;
+            }
+
+            if (!veh.Model.IsCar && !veh.Model.IsBike && !veh.Model.IsQuadbike)
+            {
+                return null;
+            }
+
+            if (!veh.IsAlive)
+            {
+                return null;
+            }
+
+            if (veh.Position.DistanceToSquared(plyrPed.Position) > 8f)
+            {
+                return null;
+            }
+
+            return veh;
         }
 
         /// <summary>
@@ -616,7 +673,7 @@ namespace FRFuel
                 return;
             }
 
-            Vehicle currentVeh = playerPed.CurrentVehicle;
+            Vehicle currentVeh = playerPed.CurrentVehicle ?? playerPed.LastVehicle;
 
             bool nearPump = _currentGasStationIndex != -1;
             bool engineRunning = currentVeh.IsEngineRunning;
@@ -626,7 +683,10 @@ namespace FRFuel
                 return;
             }
 
-            _hud.RenderBar(currentVeh.FuelLevel, FUEL_TANK_CAPACITY);
+            if (playerPed.Position.DistanceToSquared(currentVeh.Position) < 5f)
+            {
+                _hud.RenderBar(currentVeh.FuelLevel, FUEL_TANK_CAPACITY);
+            }
         }
 
         /// <summary>
@@ -693,6 +753,61 @@ namespace FRFuel
 
                 return;
             }
+        }
+
+        internal void ExternalRefuel(Ped plyrPed, Vehicle veh)
+        {
+            if (plyrPed.IsInVehicle() || veh == null)
+            {
+                return;
+            }
+
+            Vector3 pedPos = plyrPed.Position;
+
+            Prop nearestPump = World.GetAllProps()
+                .Where(x => GAS_PUMP_MODELS.Contains(x.Model) && x.Position.DistanceToSquared(pedPos) < 2f)
+                .OrderBy(x => x.Position.DistanceToSquared(pedPos))
+                .FirstOrDefault();
+
+            if (nearestPump == null)
+            {
+                return;
+            }
+
+            float max = VehicleMaxFuelLevel(veh);
+            float current = VehicleFuelLevel(veh);
+
+            DisableRefuelControls();
+
+            if (Game.IsDisabledControlJustReleased(0, Control.Context) && ADDED_FUEL_CAPACITOR > 0f)
+            {
+                TriggerEvent("frfuel:fuelAdded", ADDED_FUEL_CAPACITOR);
+                TriggerServerEvent("frfuel:fuelAdded", ADDED_FUEL_CAPACITOR);
+#if DEBUG
+                Screen.ShowNotification($"~g~Refueled {current:0.0}/{max:0.0}L");
+#endif
+                ADDED_FUEL_CAPACITOR = 0f;
+            }
+
+            if (current >= max)
+            {
+                Screen.DisplayHelpTextThisFrame("Fuel tank is full");
+
+                return;
+            }
+
+            Screen.DisplayHelpTextThisFrame("~INPUT_CONTEXT~ Refuel");
+
+            if (!Game.IsDisabledControlPressed(0, Control.Context))
+            {
+                return;
+            }
+
+            float fuelPortion = 0.1f * REFUEL_RATE;
+
+            VehicleSetFuelLevel(veh, current + fuelPortion);
+
+            ADDED_FUEL_CAPACITOR += fuelPortion;
         }
 
         /// <summary>
