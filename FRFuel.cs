@@ -78,6 +78,17 @@ namespace FRFuel
             "wheel_lr"
         };
 
+        internal IReadOnlyList<Model> GAS_PUMP_MODELS = new List<Model>()
+        {
+            new Model("prop_gas_pump_1a"),
+            new Model("prop_gas_pump_1b"),
+            new Model("prop_gas_pump_1c"),
+            new Model("prop_gas_pump_1d"),
+            new Model("prop_gas_pump_old2"),
+            new Model("prop_gas_pump_old3"),
+            new Model("prop_vintage_pump")
+        };
+
         #endregion
 
         #region Constructor
@@ -175,6 +186,7 @@ namespace FRFuel
         #endregion
 
         #region Init
+
         /// <summary>
         /// Loads configuration from file
         /// </summary>
@@ -275,10 +287,7 @@ namespace FRFuel
         /// </summary>
         /// <param name="position"></param>
         /// <returns>List of coordinates for pickups</returns>
-        public IEnumerable<Vector3> GetNearbyJerryCanPickUpCoordinates(Vector3 position)
-        {
-            return GasStations.positions.Where(p => p.DistanceToSquared(position) < 100.0f);
-        }
+        public IEnumerable<Vector3> GetNearbyJerryCanPickUpCoordinates(Vector3 position) => GasStations.positions.Where(p => p.DistanceToSquared(position) < 100.0f);
 
         /// <summary>
         /// Automatically adds pickups for nearby jerry cans, and removes when leaving area
@@ -302,30 +311,32 @@ namespace FRFuel
             {
                 _pickups.ForEach(p => p.Delete());
                 _pickups.Clear();
+
+                return;
             }
-            else
+
+            positions.ToList().ForEach(position =>
             {
-                positions.ToList().ForEach(position =>
+                if (!_pickups.Any(pickup => position.DistanceToSquared(pickup.Position) < 5f))
                 {
-                    if (!_pickups.Any(pickup => position.DistanceToSquared(pickup.Position) < 5f))
-                    {
-                        // add pickup if one doesn't exist within 5f proximity of it
-                        int pickupHandle = CreatePickup(
-                            0xc69de3ff, // Petrol Can
-                            position.X, position.Y, position.Z - 0.5f,
-                            8 | 32, // Place on the ground, local only
-                            0,
-                            true,
-                            (uint)model);
+                    // add pickup if one doesn't exist within 5f proximity of it
+                    int pickupHandle = CreatePickup(
+                        0xc69de3ff, // Petrol Can
+                        position.X, position.Y, position.Z - 0.5f,
+                        8 | 32, // Place on the ground, local only
+                        0,
+                        true,
+                        (uint)model);
 
-                        Pickup pickup = new Pickup(pickupHandle);
+                    Pickup pickup = new Pickup(pickupHandle);
 
-                        _pickups.Add(pickup);
-                    }
-                });
-            }
+                    _pickups.Add(pickup);
+                }
+            });
+
             await Task.FromResult(0);
         }
+
         #endregion
 
         #region Helper Methods
@@ -421,6 +432,22 @@ namespace FRFuel
             }
 
             return -1;
+        }
+
+        /// <summary>
+        /// Get the closest gas pump to the local ped
+        /// </summary>
+        /// <returns></returns>
+        internal Vector3 GetClosestGasPump()
+        {
+            Vector3 pedPos = Game.PlayerPed.Position;
+
+            foreach (Prop prop in World.GetAllProps().Where(x => x.Position.DistanceToSquared(pedPos) < 1.5f && GAS_PUMP_MODELS.Contains(x.Model)))
+            {
+                return prop.Position;
+            }
+
+            return Vector3.Zero;
         }
 
         /// <summary>
@@ -525,18 +552,30 @@ namespace FRFuel
         }
 
         /// <summary>
+        /// Disable controls related to E for refueling
+        /// </summary>
+        internal void DisableRefuelControls()
+        {
+            Game.DisableControlThisFrame(0, Control.Context);
+            Game.DisableControlThisFrame(0, Control.VehicleRoof);
+            Game.DisableControlThisFrame(0, Control.VehicleHorn);
+            Game.DisableControlThisFrame(0, Control.ReplayHidehud);
+            Game.DisableControlThisFrame(0, Control.VehicleShuffle);
+        }
+
+        /// <summary>
         /// Controls engine
         /// </summary>
         /// <param name="vehicle"></param>
         public void ControlEngine(Vehicle vehicle)
         {
             // all controls related to G
-            //Game.DisableControlThisFrame(0, ENGINE_TOGGLE);
-            //Game.DisableControlThisFrame(0, Control.Detonate);
-            //Game.DisableControlThisFrame(0, Control.PhoneCameraGrid);
-            //Game.DisableControlThisFrame(0, Control.VehicleFlyUnderCarriage);
+            Game.DisableControlThisFrame(0, ENGINE_TOGGLE);
+            Game.DisableControlThisFrame(0, Control.Detonate);
+            Game.DisableControlThisFrame(0, Control.PhoneCameraGrid);
+            Game.DisableControlThisFrame(0, Control.VehicleFlyUnderCarriage);
 
-            if (!Game.IsControlJustReleased(0, ENGINE_TOGGLE) || Game.IsControlPressed(0, Control.Context))
+            if (!Game.IsDisabledControlJustPressed(0, ENGINE_TOGGLE) || Game.IsControlPressed(0, Control.Context))
             {
                 return;
             }
@@ -678,70 +717,59 @@ namespace FRFuel
                 fuel = fuel < 0f ? 0f : fuel;
             }
 
-#if MANUAL_ENGINE_CUTOFF
-            if (fuel == 0f && vehicle.IsEngineRunning)
-            {
-                vehicle.IsEngineRunning = false;
-            }
-#endif
-
             // Refueling at gas station
-            if (_currentGasStationIndex != -1 && IsVehicleNearAnyPump(vehicle))
+            if (_currentGasStationIndex == -1 || !IsVehicleNearAnyPump(vehicle))
             {
-#if MANUAL_ENGINE_CUTOFF
-                if (vehicle.Speed < 0.1f && fuel != 0)
-#endif
-                if (vehicle.Speed < 0.1f)
-                {
-                    ControlEngine(vehicle);
-                }
+                VehicleSetFuelLevel(vehicle, fuel);
 
-                if (vehicle.IsEngineRunning)
-                {
-                    Screen.DisplayHelpTextThisFrame("~INPUT_THROW_GRENADE~ Turn off engine");
-
-                    return;
-                }
-
-                Screen.DisplayHelpTextThisFrame("~INPUT_CONTEXT~ Refuel\n~INPUT_THROW_GRENADE~ Turn on engine");
-
-                if (!_refuelAllowed)
-                {
-                    return;
-                }
-
-                if (!Game.IsControlPressed(0, Control.Context))
-                {
-                    return;
-                }
-
-                if (fuel < FUEL_TANK_CAPACITY)
-                {
-                    float fuelPortion = 0.1f * REFUEL_RATE;
-
-                    fuel += fuelPortion;
-                    ADDED_FUEL_CAPACITOR += fuelPortion;
-                }
-
-                if (Game.IsControlJustReleased(0, Control.Context) && ADDED_FUEL_CAPACITOR > 0f)
-                {
-                    TriggerEvent("frfuel:fuelAdded", ADDED_FUEL_CAPACITOR);
-                    TriggerServerEvent("frfuel:fuelAdded", ADDED_FUEL_CAPACITOR);
-
-                    ADDED_FUEL_CAPACITOR = 0f;
-                }
-            }
-            else
-            {
-#if MANUAL_ENGINE_CUTOFF
-                if (fuel != 0f && !vehicle.IsEngineRunning)
-                {
-                    vehicle.IsEngineRunning = true;
-                }
-#endif
+                return;
             }
 
-            VehicleSetFuelLevel(vehicle, fuel);
+            if (vehicle.Speed < 0.1f)
+            {
+                ControlEngine(vehicle);
+            }
+
+            if (vehicle.IsEngineRunning)
+            {
+                Screen.DisplayHelpTextThisFrame("~INPUT_THROW_GRENADE~ Turn off engine");
+
+                return;
+            }
+
+            Screen.DisplayHelpTextThisFrame("~INPUT_CONTEXT~ Refuel\n~INPUT_THROW_GRENADE~ Turn on engine");
+
+            if (!_refuelAllowed)
+            {
+                return;
+            }
+
+            DisableRefuelControls();
+
+            if (Game.IsDisabledControlJustReleased(0, Control.Context) && ADDED_FUEL_CAPACITOR > 0f)
+            {
+                TriggerEvent("frfuel:fuelAdded", ADDED_FUEL_CAPACITOR);
+                TriggerServerEvent("frfuel:fuelAdded", ADDED_FUEL_CAPACITOR);
+#if DEBUG
+                Screen.ShowNotification($"~g~Refueled {fuel:0.0}/{FUEL_TANK_CAPACITY:0.0}L");
+#endif
+                ADDED_FUEL_CAPACITOR = 0f;
+            }
+
+            if (!Game.IsDisabledControlPressed(0, Control.Context))
+            {
+                return;
+            }
+
+            if (fuel < FUEL_TANK_CAPACITY)
+            {
+                float fuelPortion = 0.1f * REFUEL_RATE;
+
+                fuel += fuelPortion;
+                ADDED_FUEL_CAPACITOR += fuelPortion;
+            }
+
+            VehicleSetFuelLevel(vehicle, fuel); 
         }
 
         #endregion
