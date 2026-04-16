@@ -24,6 +24,7 @@ namespace FRFuel
 
         private int _currentGasStationIndex;
 
+        protected bool _nozzleInHand = false;
         protected bool _refuelAllowed = true;
 
         protected bool _showHud = true;
@@ -759,25 +760,53 @@ namespace FRFuel
         {
             if (plyrPed.IsInVehicle() || veh == null)
             {
+                _nozzleInHand = false;
+
                 return;
             }
 
             Vector3 pedPos = plyrPed.Position;
 
             Prop nearestPump = World.GetAllProps()
-                .Where(x => GAS_PUMP_MODELS.Contains(x.Model) && x.Position.DistanceToSquared(pedPos) < 2f)
-                .OrderBy(x => x.Position.DistanceToSquared(pedPos))
+                .Where(x => GAS_PUMP_MODELS.Contains(x.Model) && x.Position.DistanceToSquared(veh.Position) < 25f)
+                .OrderBy(x => x.Position.DistanceToSquared(veh.Position))
                 .FirstOrDefault();
 
             if (nearestPump == null)
             {
+                _nozzleInHand = false;
+
+                return;
+            }
+
+            if (nearestPump.Position.DistanceToSquared(pedPos) > 6f)
+            {
+                _nozzleInHand = false;
+
+                return;
+            }
+
+            DisableRefuelControls();
+
+            if (!_nozzleInHand)
+            {
+                Screen.DisplayHelpTextThisFrame("~INPUT_CONTEXT~ Take nozzle");
+
+                if (Game.IsDisabledControlJustPressed(0, Control.Context))
+                {
+                    _nozzleInHand = true;
+                }
+
                 return;
             }
 
             float max = VehicleMaxFuelLevel(veh);
             float current = VehicleFuelLevel(veh);
 
-            DisableRefuelControls();
+            if (!_nozzleInHand)
+            {
+                return;
+            }
 
             if (Game.IsDisabledControlJustReleased(0, Control.Context) && ADDED_FUEL_CAPACITOR > 0f)
             {
@@ -799,6 +828,18 @@ namespace FRFuel
             Screen.DisplayHelpTextThisFrame("~INPUT_CONTEXT~ Refuel");
 
             if (!Game.IsDisabledControlPressed(0, Control.Context))
+            {
+                return;
+            }
+
+            if (Game.IsControlJustPressed(0, Control.Context))
+            {
+                _nozzleInHand = false;
+
+                return;
+            }
+
+            if (!Game.IsDisabledControlJustPressed(0, Control.Context) || current >= max)
             {
                 return;
             }
