@@ -66,6 +66,9 @@ namespace FRFuel
         public static string FUEL_LEVEL_DECOR = "_Fuel_Level";
         public static string JERRYCAN_ANIM_DICT = "weapon@w_sp_jerrycan";
 
+        internal const string NOZZLE_ANIM_DICT = "mp_common";
+        internal const string NOZZLE_ANIM_NAME = "givetake1_a";
+
         internal const string REFUEL_ANIM_DICT = "timetable@gardener@filling_can";
         internal const string REFUEL_ANIM_NAME = "gar_ig_5_filling_can";
 
@@ -754,7 +757,7 @@ namespace FRFuel
             return fuel;
         }
 
-        internal void ExternalRefuel(Ped plyrPed, Vehicle veh)
+        internal async void ExternalRefuel(Ped plyrPed, Vehicle veh)
         {
             Vector3 pedPos = plyrPed.Position;
 
@@ -797,6 +800,10 @@ namespace FRFuel
 
             if (Game.IsDisabledControlJustPressed(0, NOZZLE_INTERACT))
             {
+                plyrPed.Task.PlayAnimation(NOZZLE_ANIM_DICT, NOZZLE_ANIM_NAME, 30f, -1, AnimationFlags.AllowRotation | AnimationFlags.UpperBodyOnly | AnimationFlags.StayInEndFrame);
+                await Delay(800);
+                plyrPed.Task.ClearAnimation(NOZZLE_ANIM_DICT, NOZZLE_ANIM_NAME);
+
                 _nozzleInHand = !_nozzleInHand;
             }
 
@@ -824,6 +831,8 @@ namespace FRFuel
             {
                 Screen.DisplayHelpTextThisFrame($"Fuel tank is full{(_nozzleInHand ? "\n~INPUT_VEH_HEADLIGHT~ Return nozzle at pump" : "")}");
 
+                plyrPed.Task.ClearAnimation(REFUEL_ANIM_DICT, REFUEL_ANIM_NAME);
+
                 return;
             }
 
@@ -831,7 +840,14 @@ namespace FRFuel
 
             if (!Game.IsDisabledControlPressed(0, Control.Context))
             {
+                plyrPed.Task.ClearAnimation(REFUEL_ANIM_DICT, REFUEL_ANIM_NAME);
+
                 return;
+            }
+
+            if (!IsEntityPlayingAnim(plyrPed.Handle, REFUEL_ANIM_DICT, REFUEL_ANIM_NAME, 3))
+            {
+                plyrPed.Task.PlayAnimation(REFUEL_ANIM_DICT, REFUEL_ANIM_NAME, 8f, -1, AnimationFlags.AllowRotation | AnimationFlags.UpperBodyOnly | AnimationFlags.Loop);
             }
 
             float fuelPortion = 0.1f * REFUEL_RATE;
