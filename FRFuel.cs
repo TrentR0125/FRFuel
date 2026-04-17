@@ -223,7 +223,7 @@ namespace FRFuel
             {
                 Prop nozzle = new Prop(CreateObject(FUEL_NOZZLE_MODEL.Hash, 0f, 0f, 0f, true, true, true));
 
-                nozzle.AttachTo(plyrPed.Bones[Bone.SKEL_L_Hand], new Vector3(0.1f, 0.06f, -0.05f), new Vector3(-40f, -100f, -100f));
+                nozzle.AttachTo(plyrPed.Bones[Bone.SKEL_L_Hand], new Vector3(0.070f, 0.060f, 0.0f), new Vector3(180f, 70f, 100f));
 
                 SetEntityAlpha(nozzle.Handle, 255, 1);
                 NetworkRegisterEntityAsNetworked(nozzle.Handle);
@@ -247,11 +247,13 @@ namespace FRFuel
                     RopeLoadTextures();
                 }
 
-                float hoseLength = 3f;
+                float hoseLength = 4f;
 
-                Rope gasRope = new Rope(AddRope(position.X, position.Y, position.Z - 3.3f, 0f, 0f, 0f, hoseLength, 3, 6f, 0.25f, 0f, false, false, false, hoseLength, false, ref unk));
+                Vector3 fingerPos = plyrPed.Bones[Bone.IK_L_Hand].Position;
 
-                AttachEntitiesToRope(gasRope.Handle, plyrPed.Handle, nearestPump.Handle, 0f, 0f, 0f, position.X, position.Y, position.Z + 2.1f, hoseLength, false, false, "SKEL_L_Hand", null);
+                Rope gasRope = new Rope(AddRope(fingerPos.X, fingerPos.Y, fingerPos.Z, 0f, 0f, 0f, hoseLength, 3, 6f, 0.25f, 0f, false, false, false, hoseLength, false, ref unk));
+
+                AttachEntitiesToRope(gasRope.Handle, plyrPed.Handle, nearestPump.Handle, 0f, 0.1f, 0f, position.X, position.Y, position.Z + 2.1f, hoseLength, false, false, "SKEL_L_Finger01", null);
 
                 gasRope.ActivatePhysics();
 
