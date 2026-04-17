@@ -211,28 +211,33 @@ namespace FRFuel
         [EventHandler("frfuel:createAccessories")]
         internal async void OnCreateAccessories(int playerId, Vector3 position)
         {
-            Ped plyrPed = Game.PlayerPed;
+            Ped plyrPed = playerId == Game.Player.ServerId ? Game.PlayerPed : new Player(GetPlayerFromServerId(playerId)).Character;
 
             if (!FUEL_NOZZLE_MODEL.IsLoaded)
             {
                 await FUEL_NOZZLE_MODEL.Request(10);
             }
 
-            if (plyrPed.Weapons.Current != WeaponHash.Unarmed)
-            {
-                plyrPed.Weapons.Select(WeaponHash.Unarmed, true);
-            }
-
             try
             {
-                Prop nozzle = new Prop(CreateObject(FUEL_NOZZLE_MODEL.Hash, 0f, 0f, 0f, true, true, true));
+                if (playerId == Game.Player.ServerId)
+                {
+                    if (plyrPed.Weapons.Current != WeaponHash.Unarmed)
+                    {
+                        plyrPed.Weapons.Select(WeaponHash.Unarmed, true);
+                    }
 
-                nozzle.AttachTo(plyrPed.Bones[Bone.SKEL_L_Hand], new Vector3(0.070f, 0.060f, 0.0f), new Vector3(180f, 70f, 100f));
+                    Prop nozzle = new Prop(CreateObject(FUEL_NOZZLE_MODEL.Hash, 0f, 0f, 0f, true, true, true));
 
-                SetEntityAlpha(nozzle.Handle, 255, 1);
-                NetworkRegisterEntityAsNetworked(nozzle.Handle);
+                    nozzle.AttachTo(plyrPed.Bones[Bone.SKEL_L_Hand], new Vector3(0.070f, 0.060f, 0.0f), new Vector3(180f, 70f, 100f));
 
-                await Delay(150);
+                    SetEntityAlpha(nozzle.Handle, 255, 1);
+                    NetworkRegisterEntityAsNetworked(nozzle.Handle);
+
+                    await Delay(150);
+
+                    FuelAccessories.Register(playerId, nozzle.NetworkId, new KeyValuePair<int, Vector3>(0, position));
+                }
 
                 int unk = 0;
 
@@ -264,7 +269,16 @@ namespace FRFuel
                 StartRopeWinding(gasRope.Handle);
                 RopeForceLength(gasRope.Handle, 3f);
 
-                FuelAccessories.Register(playerId, nozzle.NetworkId, new KeyValuePair<int, Vector3>(gasRope.Handle, position));
+                FuelAccessories existing = FuelAccessories.GetAccessoriesByPlayer(playerId);
+
+                if (existing != null)
+                {
+                    existing.HoseId = gasRope.Handle;
+                }
+                else
+                {
+                    FuelAccessories.Register(playerId, 0, new KeyValuePair<int, Vector3>(gasRope.Handle, position));
+                }
             }
             catch (Exception ex)
             {
