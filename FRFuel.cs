@@ -22,6 +22,8 @@ namespace FRFuel
 
         private int _currentGasStationIndex;
 
+        internal int _nearestPumpCacheTimer = 0;
+
         protected bool _nozzleInHand = false;
         protected bool _isNearGasPump = false;
         protected bool _refuelAllowed = true;
@@ -39,6 +41,8 @@ namespace FRFuel
         public HUD _hud;
 
         public Random _random = new Random();
+
+        internal Prop _nearestPumpCached = null;
         
         private Vehicle _lastVehicle;
         
@@ -564,12 +568,21 @@ namespace FRFuel
         /// <returns></returns>
         internal Prop GetClosestGasPump()
         {
+            if (Game.GameTime - _nearestPumpCacheTimer < 500)
+            {
+                return _nearestPumpCached;
+            }
+
+            _nearestPumpCacheTimer = Game.GameTime;
+
             Vector3 pedPos = Game.PlayerPed.Position;
 
-            return World.GetAllProps()
+            _nearestPumpCached = World.GetAllProps()
                 .Where(x => GAS_PUMP_MODELS.Contains(x.Model) && x.Position.DistanceToSquared(pedPos) < 25f)
                 .OrderBy(x => x.Position.DistanceToSquared(pedPos))
                 .FirstOrDefault();
+
+            return _nearestPumpCached;
         }
 
         /// <summary>
