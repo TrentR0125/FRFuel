@@ -29,7 +29,7 @@ namespace FRFuel
         protected Animation loop;
         protected Animation end;
 
-        protected State state;
+        public State state;
 
         public InLoopOutAnimation(Animation start, Animation loop, Animation end)
         {
@@ -92,6 +92,14 @@ namespace FRFuel
               AnimationFlags.CancelableWithMovement
             );
             state = State.Ended;
+        }
+
+        public void StopAnim(Ped ped)
+        {
+            if (IsEntityPlayingAnim(ped.Handle, end.dict, end.name, 3))
+            {
+                ped.Task.ClearAnimation(end.dict, end.name);
+            }
         }
 
         public void RewindAndStop(Ped ped)
