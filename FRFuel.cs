@@ -1,14 +1,12 @@
-#undef MANUAL_ENGINE_CUTOFF
-
 using CitizenFX.Core;
-using CitizenFX.Core.Native;
 using CitizenFX.Core.UI;
 
 using System;
 using System.Collections.Generic;
-using System.Dynamic;
 using System.Linq;
 using System.Threading.Tasks;
+
+using FRFuel.Shared.Models;
 
 using static CitizenFX.Core.Native.API;
 
@@ -77,6 +75,8 @@ namespace FRFuel
 
         public static Control ENGINE_TOGGLE = Control.ThrowGrenade; // INPUT_THROW_GRENADE
         public static Control NOZZLE_INTERACT = Control.VehicleHeadlight; // INPUT_THROW_GRENADE
+
+        internal Model FUEL_NOZZLE_MODEL = new Model("prop_cs_fuel_nozle");
 
         public static string[] TANK_BONES = new string[] {
             "petrolcap",
@@ -204,7 +204,106 @@ namespace FRFuel
         [EventHandler("frfuel:refuelAllowed")]
         internal void OnRefuelAllowed(bool toggle) => _refuelAllowed = toggle;
 
-        #endregion
+        [EventHandler("frfuel:createAccessories")]
+        internal async void OnCreateAccessories(int playerId, Vector3 position)
+        {
+            Ped plyrPed = Game.PlayerPed;
+
+            if (!FUEL_NOZZLE_MODEL.IsLoaded)
+            {
+                await FUEL_NOZZLE_MODEL.Request(10);
+            }
+
+            if (plyrPed.Weapons.Current != WeaponHash.Unarmed)
+            {
+                plyrPed.Weapons.Select(WeaponHash.Unarmed, true);
+            }
+
+            try
+            {
+                Prop nozzle = new Prop(CreateObject(FUEL_NOZZLE_MODEL.Hash, 0f, 0f, 0f, true, true, true));
+
+                nozzle.AttachTo(plyrPed.Bones[Bone.SKEL_L_Hand], new Vector3(0.1f, 0.06f, -0.05f), new Vector3(-40f, -100f, -100f));
+
+                SetEntityAlpha(nozzle.Handle, 255, 1);
+                NetworkRegisterEntityAsNetworked(nozzle.Handle);
+
+                await Delay(150);
+
+                int unk = 0;
+
+                Prop nearestPump = GetClosestGasPump();
+
+                if (nearestPump == null)
+                {
+#if DEBUG
+                    Debug.WriteLine("Something bad happened, lol");
+#endif
+                    return;
+                }
+
+                if (!RopeAreTexturesLoaded())
+                {
+                    RopeLoadTextures();
+                }
+
+                float hoseLength = 3f;
+
+                Rope gasRope = new Rope(AddRope(position.X, position.Y, position.Z - 3.3f, 0f, 0f, 0f, hoseLength, 3, 6f, 0.25f, 0f, false, false, false, hoseLength, false, ref unk));
+
+                AttachEntitiesToRope(gasRope.Handle, plyrPed.Handle, nearestPump.Handle, 0f, 0f, 0f, position.X, position.Y, position.Z + 2.1f, hoseLength, false, false, "SKEL_L_Hand", null);
+
+                gasRope.ActivatePhysics();
+
+                StartRopeWinding(gasRope.Handle);
+                RopeForceLength(gasRope.Handle, 3f);
+
+                FuelAccessories.Register(playerId, nozzle.NetworkId, new KeyValuePair<int, Vector3>(gasRope.Handle, position));
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine(ex.Message);
+                Debug.WriteLine(ex.StackTrace);
+            }
+        }
+
+        [EventHandler("frfuel:removeAccessories")]
+        internal void OnRemoveAccesorries(int playerId)
+        {
+            FuelAccessories accessories = FuelAccessories.GetAccessoriesByPlayer(playerId);
+
+            if (accessories == null)
+            {
+                return;
+            }
+
+            try
+            {
+                int hoseId = accessories.HoseId;
+
+                if (DoesRopeExist(ref hoseId))
+                {
+                    RopeUnloadTextures();
+                    DeleteRope(ref hoseId);
+                }
+
+                int nozzleId = NetworkGetEntityFromNetworkId(accessories.NozzleId);
+
+                if (DoesEntityExist(nozzleId))
+                {
+                    DeleteEntity(ref nozzleId);
+                }
+
+                FuelAccessories.Unregister(playerId);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine(ex.Message);
+                Debug.WriteLine(ex.StackTrace);
+            }
+        }
+
+#endregion
 
         #region Init
 
@@ -461,16 +560,14 @@ namespace FRFuel
         /// Get the closest gas pump to the local ped
         /// </summary>
         /// <returns></returns>
-        internal Vector3 GetClosestGasPump()
+        internal Prop GetClosestGasPump()
         {
             Vector3 pedPos = Game.PlayerPed.Position;
 
-            foreach (Prop prop in World.GetAllProps().Where(x => x.Position.DistanceToSquared(pedPos) < 1.5f && GAS_PUMP_MODELS.Contains(x.Model)))
-            {
-                return prop.Position;
-            }
-
-            return Vector3.Zero;
+            return World.GetAllProps()
+                .Where(x => GAS_PUMP_MODELS.Contains(x.Model) && x.Position.DistanceToSquared(pedPos) < 25f)
+                .OrderBy(x => x.Position.DistanceToSquared(pedPos))
+                .FirstOrDefault();
         }
 
         /// <summary>
@@ -761,10 +858,7 @@ namespace FRFuel
         {
             Vector3 pedPos = plyrPed.Position;
 
-            Prop nearestPump = World.GetAllProps()
-                .Where(x => GAS_PUMP_MODELS.Contains(x.Model) && x.Position.DistanceToSquared(pedPos) < 25f)
-                .OrderBy(x => x.Position.DistanceToSquared(pedPos))
-                .FirstOrDefault();
+            Prop nearestPump = GetClosestGasPump();
 
             if (nearestPump == null)
             {
@@ -805,6 +899,15 @@ namespace FRFuel
                 plyrPed.Task.ClearAnimation(NOZZLE_ANIM_DICT, NOZZLE_ANIM_NAME);
 
                 _nozzleInHand = !_nozzleInHand;
+
+                if (_nozzleInHand)
+                {
+                    TriggerServerEvent("frfuel:server:createAccessories", nearestPump.Position);
+                }
+                else
+                {
+                    TriggerServerEvent("frfuel:server:removeAccessories");
+                }
             }
 
             float max = VehicleMaxFuelLevel(veh);

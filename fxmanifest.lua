@@ -8,3 +8,5 @@ files {
 }
 
 client_script "frfuel.net.dll"
+
+server_script "frfuel.server.net.dll"

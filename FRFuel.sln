@@ -1,9 +1,12 @@
-
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 14
-VisualStudioVersion = 14.0.25420.1
+# Visual Studio Version 18
+VisualStudioVersion = 18.4.11626.88 stable
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FRFuel", "FRFuel.csproj", "{11AE476B-DD55-40F9-A374-174808F0C106}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FRFuel.Server", "Server\FRFuel.Server.csproj", "{070A1A9C-A849-45BC-A931-07A5B8BC5BC5}"
+EndProject
+Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "FRFuel.Shared", "Shared\FRFuel.Shared.shproj", "{2D230330-AC6B-4231-8E5A-4BA111939290}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -15,12 +18,20 @@ Global
 		{11AE476B-DD55-40F9-A374-174808F0C106}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{11AE476B-DD55-40F9-A374-174808F0C106}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{11AE476B-DD55-40F9-A374-174808F0C106}.Release|Any CPU.Build.0 = Release|Any CPU
-		{57AFD88B-342A-45AD-B26F-274854E3A068}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{57AFD88B-342A-45AD-B26F-274854E3A068}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{57AFD88B-342A-45AD-B26F-274854E3A068}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{57AFD88B-342A-45AD-B26F-274854E3A068}.Release|Any CPU.Build.0 = Release|Any CPU
+		{070A1A9C-A849-45BC-A931-07A5B8BC5BC5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{070A1A9C-A849-45BC-A931-07A5B8BC5BC5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{070A1A9C-A849-45BC-A931-07A5B8BC5BC5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{070A1A9C-A849-45BC-A931-07A5B8BC5BC5}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {5B9BAA2E-9C62-4370-941A-45AB41ABE2D9}
+	EndGlobalSection
+	GlobalSection(SharedMSBuildProjectFiles) = preSolution
+		Shared\Shared.projitems*{070a1a9c-a849-45bc-a931-07a5b8bc5bc5}*SharedItemsImports = 4
+		Shared\Shared.projitems*{11ae476b-dd55-40f9-a374-174808f0c106}*SharedItemsImports = 4
+		Shared\Shared.projitems*{2d230330-ac6b-4231-8e5a-4ba111939290}*SharedItemsImports = 13
 	EndGlobalSection
 EndGlobal
