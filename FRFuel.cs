@@ -344,7 +344,7 @@ namespace FRFuel
                     DeleteRope(ref hoseId);
                 }
 
-                int nozzleId = accessories.NozzleId
+                int nozzleId = accessories.NozzleId;
 
                 if (DoesEntityExist(nozzleId))
                 {
