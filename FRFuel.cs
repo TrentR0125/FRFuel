@@ -1,12 +1,12 @@
 using CitizenFX.Core;
 using CitizenFX.Core.UI;
 
+using FRFuel.Shared.Models;
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-
-using FRFuel.Shared.Models;
 
 using static CitizenFX.Core.Native.API;
 
@@ -88,6 +88,13 @@ namespace FRFuel
             "petroltank_r",
             "petroltank_l",
             "wheel_lr"
+        };
+
+        internal IReadOnlyList<Model> OLD_GAS_PUMP_MODELS = new List<Model>()
+        {
+            new Model("prop_gas_pump_old2"),
+            new Model("prop_gas_pump_old3"),
+            new Model("prop_vintage_pump")
         };
 
         internal IReadOnlyList<Model> GAS_PUMP_MODELS = new List<Model>()
@@ -205,6 +212,25 @@ namespace FRFuel
 
         #region Event Handlers
 
+        [EventHandler("onResourceStop")]
+        internal void OnResourceStop(string resourceName)
+        {
+            if (resourceName == GetCurrentResourceName())
+            {
+                TriggerServerEvent("frfuel:server:removeAllAccessories");
+
+                foreach (FuelAccessories accessories in FuelAccessories.GetAllAccessories())
+                {
+                    if (accessories == null)
+                    {
+                        continue;
+                    }
+
+                    OnRemoveAccesorries(accessories.PlayerId);
+                }
+            }
+        }
+
         [EventHandler("frfuel:refuelAllowed")]
         internal void OnRefuelAllowed(bool toggle) => _refuelAllowed = toggle;
 
@@ -236,7 +262,7 @@ namespace FRFuel
 
                     await Delay(150);
 
-                    FuelAccessories.Register(playerId, nozzle.NetworkId, new KeyValuePair<int, Vector3>(0, position));
+                    FuelAccessories.Register(playerId, nozzle.Handle, new KeyValuePair<int, Vector3>(0, position));
                 }
 
                 int unk = 0;
@@ -262,7 +288,18 @@ namespace FRFuel
 
                 Rope gasRope = new Rope(AddRope(fingerPos.X, fingerPos.Y, fingerPos.Z, 0f, 0f, 0f, hoseLength, 3, 6f, 0.25f, 0f, false, false, false, hoseLength, false, ref unk));
 
-                AttachEntitiesToRope(gasRope.Handle, plyrPed.Handle, nearestPump.Handle, 0f, 0.1f, 0f, position.X, position.Y, position.Z + 2.1f, hoseLength, false, false, "SKEL_L_Finger01", null);
+                float hoseHeight;
+
+                if (OLD_GAS_PUMP_MODELS.Contains(nearestPump.Model))
+                {
+                    hoseHeight = 1.5f;
+                }
+                else
+                {
+                    hoseHeight = 2.1f;
+                }
+
+                AttachEntitiesToRope(gasRope.Handle, plyrPed.Handle, nearestPump.Handle, 0f, 0.1f, 0f, position.X, position.Y, position.Z + hoseHeight, hoseLength, false, false, "SKEL_L_Finger01", null);
 
                 gasRope.ActivatePhysics();
 
@@ -307,7 +344,7 @@ namespace FRFuel
                     DeleteRope(ref hoseId);
                 }
 
-                int nozzleId = NetworkGetEntityFromNetworkId(accessories.NozzleId);
+                int nozzleId = accessories.NozzleId;/*NetworkGetEntityFromNetworkId(accessories.NozzleId);*/
 
                 if (DoesEntityExist(nozzleId))
                 {

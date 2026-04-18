@@ -1,6 +1,7 @@
 ﻿using CitizenFX.Core;
 
 using System.Collections.Generic;
+using System.Linq;
 
 namespace FRFuel.Shared.Models
 {
@@ -66,7 +67,13 @@ namespace FRFuel.Shared.Models
         /// Get the fuel accessories by player Id
         /// </summary>
         /// <param name="playerId"></param>
-        /// <returns>fuel accessories</returns>
+        /// <returns>FuelAccessories</returns>
         public static FuelAccessories GetAccessoriesByPlayer(int playerId) => _fuelAccessories.TryGetValue(playerId, out FuelAccessories accessories) ? accessories : null;
+
+        /// <summary>
+        /// Get all fuel accessories
+        /// </summary>
+        /// <returns>List<FuelAccessories></returns>
+        public static List<FuelAccessories> GetAllAccessories() => _fuelAccessories.Values.ToList();
     }
 }
