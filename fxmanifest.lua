@@ -1,7 +1,11 @@
 fx_version "cerulean"
 game "gta5"
 
+ui_page "html/index.html"
+
 files { 
+    "html/*.html",
+    "html/sounds/*.mp3",
     "config.ini",
     "GasStations.json",
     "Newtonsoft.Json.dll"

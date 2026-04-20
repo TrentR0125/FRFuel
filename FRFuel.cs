@@ -3,6 +3,8 @@ using CitizenFX.Core.UI;
 
 using FRFuel.Shared.Models;
 
+using Newtonsoft.Json;
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -68,8 +70,8 @@ namespace FRFuel
         public static string FUEL_LEVEL_DECOR = "_Fuel_Level";
         public static string JERRYCAN_ANIM_DICT = "weapon@w_sp_jerrycan";
 
-        internal const string NOZZLE_ANIM_DICT = "mp_common";
-        internal const string NOZZLE_ANIM_NAME = "givetake1_a";
+        internal const string NOZZLE_ANIM_DICT = "mp_common"; // TODO: find a fitting anim (uses right hand)
+        internal const string NOZZLE_ANIM_NAME = "givetake1_a"; // TODO: find a fitting anim (uses right hand)
 
         internal const string REFUEL_ANIM_DICT = "timetable@gardener@filling_can";
         internal const string REFUEL_ANIM_NAME = "gar_ig_5_filling_can";
@@ -384,7 +386,7 @@ namespace FRFuel
 
             _showHud = Config.Get("ShowHud", "true") == "true";
             _showHudWhenEngineOff = Config.Get("ShowHudWhenEngineOff", "true").ToLower() == "true";
-            _useInVehicleRefueling = Config.Get("InVehicleRefuel", "false").ToLower() == "false";
+            _useInVehicleRefueling = Config.Get("InVehicleRefuel", "false").ToLower() == "true";
 
             var fuelConsumptionString = Config.Get("FuelConsumptionRate", "1");
             if (float.TryParse(fuelConsumptionString, out float tmpFuelConsumptionRate))
@@ -464,6 +466,13 @@ namespace FRFuel
         #endregion
 
         #region Helper Methods
+
+        /// <summary>
+        /// Send an nui message to play a sound
+        /// </summary>
+        /// <param name="type"></param>
+        /// <param name="sound"></param>
+        internal void PlaySound(string type, string sound = null) => SendNuiMessage(JsonConvert.SerializeObject(new { type, sound }));
 
         /// <summary>
         /// Returns vehicle's max fuel level
@@ -968,10 +977,15 @@ namespace FRFuel
 
                 if (_nozzleInHand)
                 {
+                    PlaySound("PLAY_SOUND", "fuel_nozzle_take");
+
                     TriggerServerEvent("frfuel:server:createAccessories", nearestPump.Position);
                 }
                 else
                 {
+                    PlaySound("STOP_LOOP_SOUND");
+                    PlaySound("PLAY_SOUND", "fuel_nozzle_return");
+
                     TriggerServerEvent("frfuel:server:removeAccessories");
                 }
             }
@@ -1000,6 +1014,8 @@ namespace FRFuel
             {
                 Screen.DisplayHelpTextThisFrame($"Fuel tank is full{(_nozzleInHand ? "\n~INPUT_VEH_HEADLIGHT~ Return nozzle at pump" : "")}");
 
+                PlaySound("STOP_LOOP_SOUND");
+
                 plyrPed.Task.ClearAnimation(REFUEL_ANIM_DICT, REFUEL_ANIM_NAME);
 
                 return;
@@ -1009,6 +1025,8 @@ namespace FRFuel
 
             if (!Game.IsDisabledControlPressed(0, Control.Context))
             {
+                PlaySound("STOP_LOOP_SOUND");
+
                 plyrPed.Task.ClearAnimation(REFUEL_ANIM_DICT, REFUEL_ANIM_NAME);
 
                 return;
@@ -1017,6 +1035,8 @@ namespace FRFuel
             if (!IsEntityPlayingAnim(plyrPed.Handle, REFUEL_ANIM_DICT, REFUEL_ANIM_NAME, 3))
             {
                 plyrPed.Task.PlayAnimation(REFUEL_ANIM_DICT, REFUEL_ANIM_NAME, 8f, -1, AnimationFlags.AllowRotation | AnimationFlags.UpperBodyOnly | AnimationFlags.Loop);
+
+                PlaySound("LOOP_SOUND", "refueling");
             }
 
             float fuelPortion = 0.1f * REFUEL_RATE;

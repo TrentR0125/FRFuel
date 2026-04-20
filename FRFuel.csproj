@@ -59,6 +59,18 @@
     <Compile Include="TinyTween.cs" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="html\index.html">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="html\sounds\fuel_nozzle_return.mp3">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="html\sounds\fuel_nozzle_take.mp3">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="html\sounds\refueling.mp3">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
     <None Include=".gitignore" />
     <Content Include="fxmanifest.lua">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>

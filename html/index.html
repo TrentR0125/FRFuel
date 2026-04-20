@@ -1,0 +1,72 @@
+<html>
+<head>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.1.1/howler.min.js" type="text/javascript"></script>
+</head>
+
+<body>
+    <script>
+        let sound = null;
+        let loopSound = null;
+
+        window.addEventListener("message", function (e) {
+            const type = e.data.type;
+            const s = e.data.sound;
+
+            switch (type) {
+                case "PLAY_SOUND":
+                    playSound(s);
+                    break;
+
+                case "LOOP_SOUND":
+                    playLoopSound(s);
+                    break;
+
+                case "STOP_LOOP_SOUND":
+                    stopLoopSound();
+                    break;
+            }
+        });
+
+        function stopSound() {
+            if (sound) {
+                sound.stop();
+                sound.unload();
+
+                sound = null;
+            }
+        }
+
+        function playSound(s) {
+            stopSound();
+
+            sound = new Howl({
+                src: `./sounds/${s}.mp3`,
+                volume: 0.5
+            });
+
+            sound.play();
+        }
+
+        function stopLoopSound() {
+            if (loopSound) {
+                loopSound.stop();
+                loopSound.unload();
+
+                loopSound = null;
+            }
+        }
+
+        function playLoopSound(s) {
+            stopLoopSound();
+
+            loopSound = new Howl({
+                src: `./sounds/${s}.mp3`,
+                volume: 0.2,
+                loop: true
+            })
+
+            loopSound.play();
+        }
+    </script>
+</body>
+</html>
